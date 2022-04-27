@@ -24,6 +24,22 @@ namespace GUI {
 static const Slic3r::ColorRGBA DEFAULT_PLANE_COLOR       = { 0.9f, 0.9f, 0.9f, 0.5f };
 static const Slic3r::ColorRGBA DEFAULT_HOVER_PLANE_COLOR = { 0.9f, 0.9f, 0.9f, 0.75f };
 
+
+
+
+
+
+
+
+static Halfedge_index hi;
+static bool hi_initialized = false;
+static std::unique_ptr<SurfaceMesh> sm_ptr;
+
+
+
+
+
+
 GLGizmoFlatten::GLGizmoFlatten(GLCanvas3D& parent, const std::string& icon_filename, unsigned int sprite_id)
     : GLGizmoBase(parent, icon_filename, sprite_id)
 {
@@ -47,9 +63,7 @@ bool GLGizmoFlatten::on_mouse(const wxMouseEvent &mouse_event)
             m_mouse_left_down = true;
             Selection &selection = m_parent.get_selection();
             if (selection.is_single_full_instance()) {
-                // Rotate the object so the normal points downward:
-                selection.flattening_rotate(m_planes[m_hover_id].normal);
-                m_parent.do_rotate(L("Gizmo-Place on Face"));
+                hi = sm_ptr->halfedge(Face_index(m_hover_id));
             }
             return true;
         }
@@ -115,21 +129,22 @@ void GLGizmoFlatten::on_render()
 
 
 
-    static const indexed_triangle_set& its = m_c->selection_info()->model_object()->volumes.front()->mesh().its;
-    static const SurfaceMesh sm(its);
-    static Halfedge_index hi = sm.halfedge(Face_index(0));
+    if (! hi_initialized) {
+        const indexed_triangle_set& its = m_c->selection_info()->model_object()->volumes.front()->mesh().its;
+        sm_ptr.reset(new SurfaceMesh(its));
+        hi = sm_ptr->halfedge(Face_index(0));
+        hi_initialized = true;
+    }
+    SurfaceMesh& sm = *sm_ptr;
 
 
 
 
-
-#if ENABLE_LEGACY_OPENGL_REMOVAL
     GLShaderProgram* shader = wxGetApp().get_shader("flat");
     if (shader == nullptr)
         return;
     
     shader->start_using();
-#endif // ENABLE_LEGACY_OPENGL_REMOVAL
 
     glsafe(::glClear(GL_DEPTH_BUFFER_BIT));
 
@@ -138,34 +153,24 @@ void GLGizmoFlatten::on_render()
 
     if (selection.is_single_full_instance()) {
         const Transform3d& m = selection.get_volume(*selection.get_volume_idxs().begin())->get_instance_transformation().get_matrix();
-#if ENABLE_GL_SHADERS_ATTRIBUTES
+
         const Camera& camera = wxGetApp().plater()->get_camera();
         const Transform3d view_model_matrix = camera.get_view_matrix() *
             Geometry::assemble_transform(selection.get_volume(*selection.get_volume_idxs().begin())->get_sla_shift_z() * Vec3d::UnitZ()) * m;
 
         shader->set_uniform("view_model_matrix", view_model_matrix);
         shader->set_uniform("projection_matrix", camera.get_projection_matrix());
-#else
-        glsafe(::glPushMatrix());
-        glsafe(::glTranslatef(0.f, 0.f, selection.get_volume(*selection.get_volume_idxs().begin())->get_sla_shift_z()));
-        glsafe(::glMultMatrixd(m.data()));
-#endif // ENABLE_GL_SHADERS_ATTRIBUTES
+
         if (this->is_plane_update_necessary())
             update_planes();
-        int i = sm.face(hi);
-        if (i < m_planes.size()) {
-#if ENABLE_LEGACY_OPENGL_REMOVAL
+        int cur_face = hi.is_invalid() ? 1000000 : sm.face(hi);
+        for (int i=0; i < m_planes.size(); ++i) {
             m_planes[i].vbo.set_color(i == m_hover_id ? DEFAULT_HOVER_PLANE_COLOR : DEFAULT_PLANE_COLOR);
+            if (i == cur_face)
+                m_planes[i].vbo.set_color(i == m_hover_id ? ColorRGBA(.5f, 0.f, 0.f, 1.f) : ColorRGBA(1.f, 0.f, 0.f, 1.f));
             m_planes[i].vbo.render();
-#else
-            glsafe(::glColor4fv(i == m_hover_id ? DEFAULT_HOVER_PLANE_COLOR.data() : DEFAULT_PLANE_COLOR.data()));
-            if (m_planes[i].vbo.has_VBOs())
-                m_planes[i].vbo.render();
-#endif // ENABLE_LEGACY_OPENGL_REMOVAL
+
         }
-#if !ENABLE_GL_SHADERS_ATTRIBUTES
-        glsafe(::glPopMatrix());
-#endif // !ENABLE_GL_SHADERS_ATTRIBUTES
     }
 
 
@@ -203,9 +208,11 @@ void GLGizmoFlatten::on_render()
     if (invalid) {
         if (m_imgui->button(std::string("HALFEDGE INVALID (Click to reset)")))
             hi = sm.halfedge(Face_index(0));
+    } else {
+        m_imgui->text(sm.is_border(hi) ? "BORDER HALFEDGE !" : "Halfedge is not border");
+        m_imgui->text((std::string("Face: ") + std::to_string(int(hi.face()))).c_str());
     }
     m_imgui->disabled_begin(invalid);
-        m_imgui->text(sm.is_border(hi) ? "BORDER HALFEDGE !" : "Halfedge is not border");
     if (m_imgui->button(std::string("next")))
         hi = sm.next(hi);
     if (m_imgui->button(std::string("prev")))
@@ -224,11 +231,11 @@ void GLGizmoFlatten::on_render()
         m_imgui->disabled_end();
     m_imgui->end();
 
-    Vec3d a = sm.point(sm.source(hi)).cast<double>();
-    Vec3d b = sm.point(sm.target(hi)).cast<double>();
-
-    
-    draw_arrow(a, b);
+    if (! hi.is_invalid()) {
+        Vec3d a = sm.point(sm.source(hi)).cast<double>();
+        Vec3d b = sm.point(sm.target(hi)).cast<double>();
+        draw_arrow(a, b);
+    }
     
 
     /////////////////
@@ -242,9 +249,7 @@ void GLGizmoFlatten::on_render()
     glsafe(::glEnable(GL_CULL_FACE));
     glsafe(::glDisable(GL_BLEND));
 
-#if ENABLE_LEGACY_OPENGL_REMOVAL
     shader->stop_using();
-#endif // ENABLE_LEGACY_OPENGL_REMOVAL
 }
 
 void GLGizmoFlatten::on_render_for_picking()

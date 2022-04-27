@@ -6,9 +6,14 @@ namespace Slic3r {
 
 Halfedge_index SurfaceMesh::opposite(Halfedge_index h) const
 {
-    assert(! h.is_invalid());
+    if (h.is_invalid())
+        return h;
+
     int face_idx = m_face_neighbors[h.m_face][h.m_side];
     Halfedge_index h_candidate = halfedge(Face_index(face_idx));
+
+    if (h_candidate.is_invalid())
+        return Halfedge_index(); // invalid
 
     for (int i=0; i<3; ++i) {
         if (is_same_vertex(source(h_candidate), target(h))) {

@@ -73,7 +73,7 @@ public:
 
     const stl_vertex& point(Vertex_index v) const { return m_its.vertices[m_its.indices[v.m_face][v.m_vertex_idx]]; }
 
-    bool is_border(Halfedge_index h) const { return opposite(h).is_invalid(); }
+    bool is_border(Halfedge_index h) const { return m_face_neighbors[h.m_face][h.m_side] == -1; }
 
     bool is_same_vertex(const Vertex_index& a, const Vertex_index& b) const { return m_its.indices[a.m_face][a.m_vertex_idx] == m_its.indices[b.m_face][b.m_vertex_idx]; }
 
