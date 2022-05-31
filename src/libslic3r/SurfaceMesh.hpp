@@ -16,6 +16,7 @@ class Halfedge_index {
 
 public:
     Halfedge_index() : m_face(Face_index(-1)), m_side(0) {}
+    Face_index face() const { return m_face; }
     bool is_invalid() const { return int(m_face) < 0; }
     bool operator!=(const Halfedge_index& rhs) const { return ! ((*this) == rhs); }
     bool operator==(const Halfedge_index& rhs) const { return m_face == rhs.m_face && m_side == rhs.m_side; }
